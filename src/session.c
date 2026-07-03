@@ -101,7 +101,7 @@ ses_put_fname(FILE *fd, char_u *name, unsigned *flagp, bool add_eol)
  * Returns FAIL if writing fails.
  */
     static int
-ses_fname(FILE *fd, buf_T *buf, unsigned *flagp, int add_eol)
+ses_buf_fname(FILE *fd, buf_T *buf, unsigned *flagp, int add_eol)
 {
     char_u	*name;
 
@@ -420,11 +420,11 @@ put_view(
 	    // edit that buffer, to not lose folding information (:edit resets
 	    // folds in other buffers)
 	    if (fputs("if bufexists(fnamemodify(\"", fd) < 0
-		    || ses_fname(fd, wp->w_buffer, flagp, FALSE) == FAIL
+		    || ses_buf_fname(fd, wp->w_buffer, flagp, FALSE) == FAIL
 		    || fputs("\", \":p\")) | buffer ", fd) < 0
-		    || ses_fname(fd, wp->w_buffer, flagp, FALSE) == FAIL
+		    || ses_buf_fname(fd, wp->w_buffer, flagp, FALSE) == FAIL
 		    || fputs(" | else | edit ", fd) < 0
-		    || ses_fname(fd, wp->w_buffer, flagp, FALSE) == FAIL
+		    || ses_buf_fname(fd, wp->w_buffer, flagp, FALSE) == FAIL
 		    || fputs(" | endif", fd) < 0
 		    || put_eol(fd) == FAIL)
 		return FAIL;
@@ -439,7 +439,7 @@ put_view(
 	    {
 		// The buffer does have a name, but it's not a file name.
 		if (fputs("file ", fd) < 0
-			|| ses_fname(fd, wp->w_buffer, flagp, TRUE) == FAIL)
+			|| ses_buf_fname(fd, wp->w_buffer, flagp, TRUE) == FAIL)
 		    return FAIL;
 	    }
 # endif
@@ -458,7 +458,7 @@ put_view(
 		&& *alt->b_fname != NUL
 		&& alt->b_p_bl
 		&& (fputs("balt ", fd) < 0
-		|| ses_fname(fd, alt, flagp, TRUE) == FAIL))
+		|| ses_buf_fname(fd, alt, flagp, TRUE) == FAIL))
 	    return FAIL;
     }
 
@@ -746,7 +746,7 @@ makeopens(
 	{
 	    FD_PRINTF_N("badd +%ld ",
 		    buf->b_wininfo == NULL ? 1L : buf->b_wininfo->wi_fpos.lnum);
-	    if (ses_fname(fd, buf, &ssop_flags, TRUE) == FAIL)
+	    if (ses_buf_fname(fd, buf, &ssop_flags, TRUE) == FAIL)
 		goto fail;
 	}
     }
@@ -848,7 +848,7 @@ makeopens(
 		need_tabnext = FALSE;
 
 		if (fputs("edit ", fd) < 0
-			      || ses_fname(fd, wp->w_buffer, &ssop_flags, TRUE)
+			  || ses_buf_fname(fd, wp->w_buffer, &ssop_flags, TRUE)
 								       == FAIL)
 		    goto fail;
 		if (!wp->w_arg_idx_invalid)
