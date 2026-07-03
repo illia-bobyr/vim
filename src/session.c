@@ -56,14 +56,23 @@ static int did_lcd;	// whether ":lcd" was produced for a session
  * Write a file name to the session file.
  * Takes care of the "slash" option in 'sessionoptions' and escapes special
  * characters.
+ * If "prefix" is not NULL, it is output before the file name.
  * Returns FAIL if writing fails or out of memory.
  */
     static int
-ses_put_fname(FILE *fd, char_u *name, unsigned *flagp, bool add_eol)
+ses_put_fname(
+	FILE *fd,
+	char *prefix,
+	char_u *name,
+	unsigned *flagp,
+	bool add_eol)
 {
     char_u	*sname;
     char_u	*p;
     int		retval = OK;
+
+    if (prefix != NULL && fputs(prefix, fd) < 0)
+	return FAIL;
 
     sname = home_replace_save(NULL, name);
     if (sname == NULL)
@@ -120,7 +129,7 @@ ses_buf_fname(FILE *fd, buf_T *buf, unsigned *flagp, int add_eol)
 	name = buf->b_sfname;
     else
 	name = buf->b_ffname;
-    if (ses_put_fname(fd, name, flagp, add_eol) == FAIL)
+    if (ses_put_fname(fd, prefix, name, flagp, add_eol) == FAIL)
 	return FAIL;
     return OK;
 }
@@ -160,8 +169,7 @@ ses_arglist(
 		    s = buf;
 		}
 	    }
-	    if (fputs(":$argadd ", fd) < 0
-		    || ses_put_fname(fd, s, flagp, true) == FAIL)
+	    if (ses_put_fname(fd, ":$argadd ", s, flagp, true) == FAIL)
 	    {
 		vim_free(buf);
 		return FAIL;
@@ -567,8 +575,7 @@ put_view(
     if (wp->w_localdir != NULL
 			    && (flagp != &vop_flags || (*flagp & SSOP_CURDIR)))
     {
-	if (fputs("lcd ", fd) < 0
-		|| ses_put_fname(fd, wp->w_localdir, flagp, true) == FAIL)
+	if (ses_put_fname(fd, "lcd ", wp->w_localdir, flagp, true) == FAIL)
 	    return FAIL;
 	did_lcd = TRUE;
     }
@@ -708,8 +715,7 @@ makeopens(
     {
 	sname = home_replace_save(NULL, globaldir != NULL ? globaldir : dirnow);
 	if (sname == NULL
-		|| fputs("cd ", fd) < 0
-		|| ses_put_fname(fd, sname, &ssop_flags, true) == FAIL)
+		|| ses_put_fname(fd, "cd ", sname, &ssop_flags, true) == FAIL)
 	{
 	    vim_free(sname);
 	    goto fail;
@@ -920,9 +926,8 @@ makeopens(
 	// override the tab-local directory.
 	if ((ssop_flags & SSOP_CURDIR) && tp->tp_localdir != NULL)
 	{
-	    if (fputs("tcd ", fd) < 0
-		     || ses_put_fname(fd, tp->tp_localdir, &ssop_flags, true)
-			     == FAIL)
+	    if (ses_put_fname(fd, "tcd ", tp->tp_localdir, &ssop_flags, true)
+		    == FAIL)
 		goto fail;
 	    did_lcd = TRUE;
 	}
