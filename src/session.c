@@ -48,6 +48,17 @@
     } while (0) \
     /* */
 
+/*
+ * Similar to "FD_LINE" above, but for "ses_put_fname()".
+ * This will always print the new line at the end.
+ */
+#define FD_SES_FNAME(prefix, name, flagp) \
+    do { \
+	if (ses_put_fname(fd, (prefix), (name), (flagp), true) == FAIL) \
+	    goto fail; \
+    } while (0) \
+    /* */
+
 #if defined(FEAT_SESSION)
 
 static int did_lcd;	// whether ":lcd" was produced for a session
@@ -150,34 +161,36 @@ ses_arglist(
     char_u	*buf = NULL;
     char_u	*s;
 
-    if (fputs(cmd, fd) < 0 || put_eol(fd) == FAIL)
-	return FAIL;
-    if (put_line(fd, ":%argdel") == FAIL)
-	return FAIL;
+    if (fullname) {
+	buf = alloc(MAXPATHL);
+	if (buf == NULL)
+	    return FAIL;
+    }
+
+    FD_LINE(cmd);
+    FD_LINE(":%argdel");
+
     for (i = 0; i < gap->ga_len; ++i)
     {
 	// NULL file names are skipped (only happens when out of memory).
 	s = alist_name(&((aentry_T *)gap->ga_data)[i]);
-	if (s != NULL)
+	if (s == NULL)
+	    continue;
+
+	if (fullname)
 	{
-	    if (fullname)
-	    {
-		buf = alloc(MAXPATHL);
-		if (buf != NULL)
-		{
-		    (void)vim_FullName(s, buf, MAXPATHL, FALSE);
-		    s = buf;
-		}
-	    }
-	    if (ses_put_fname(fd, ":$argadd ", s, flagp, true) == FAIL)
-	    {
-		vim_free(buf);
-		return FAIL;
-	    }
-	    vim_free(buf);
+	    (void)vim_FullName(s, buf, MAXPATHL, FALSE);
+	    s = buf;
 	}
+	FD_SES_FNAME(":$argadd ", s, flagp);
     }
+
+    vim_free(buf);
     return OK;
+
+fail:
+    vim_free(buf);
+    return FAIL;
 }
 
 /*
