@@ -343,13 +343,15 @@ fail:
     static int
 put_view_curpos(FILE *fd, win_T *wp, char *spaces)
 {
-    int r;
-
     if (wp->w_curswant == MAXCOL)
-	r = fprintf(fd, "%snormal! $", spaces);
+	FD_PRINTF("%snormal! $", spaces);
     else
-	r = fprintf(fd, "%snormal! 0%d|", spaces, wp->w_virtcol + 1);
-    return r < 0 || put_eol(fd) == FAIL ? FALSE : OK;
+	FD_PRINTF("%snormal! 0%d|", spaces, wp->w_virtcol + 1);
+
+    return OK;
+
+fail:
+    return FAIL;
 }
 
 /*
