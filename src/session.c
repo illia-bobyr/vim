@@ -59,7 +59,7 @@ static int did_lcd;	// whether ":lcd" was produced for a session
  * Returns FAIL if writing fails or out of memory.
  */
     static int
-ses_put_fname(FILE *fd, char_u *name, unsigned *flagp)
+ses_put_fname(FILE *fd, char_u *name, unsigned *flagp, bool add_eol)
 {
     char_u	*sname;
     char_u	*p;
@@ -88,6 +88,10 @@ ses_put_fname(FILE *fd, char_u *name, unsigned *flagp)
 	retval = FAIL;
 
     vim_free(p);
+
+    if (add_eol && put_eol(fd) == FAIL)
+	retval = FAIL;
+
     return retval;
 }
 
@@ -116,8 +120,7 @@ ses_fname(FILE *fd, buf_T *buf, unsigned *flagp, int add_eol)
 	name = buf->b_sfname;
     else
 	name = buf->b_ffname;
-    if (ses_put_fname(fd, name, flagp) == FAIL
-	    || (add_eol && put_eol(fd) == FAIL))
+    if (ses_put_fname(fd, name, flagp, add_eol) == FAIL)
 	return FAIL;
     return OK;
 }
@@ -158,8 +161,7 @@ ses_arglist(
 		}
 	    }
 	    if (fputs(":$argadd ", fd) < 0
-		    || ses_put_fname(fd, s, flagp) == FAIL
-		    || put_eol(fd) == FAIL)
+		    || ses_put_fname(fd, s, flagp, true) == FAIL)
 	    {
 		vim_free(buf);
 		return FAIL;
@@ -566,8 +568,7 @@ put_view(
 			    && (flagp != &vop_flags || (*flagp & SSOP_CURDIR)))
     {
 	if (fputs("lcd ", fd) < 0
-		|| ses_put_fname(fd, wp->w_localdir, flagp) == FAIL
-		|| put_eol(fd) == FAIL)
+		|| ses_put_fname(fd, wp->w_localdir, flagp, true) == FAIL)
 	    return FAIL;
 	did_lcd = TRUE;
     }
@@ -708,8 +709,7 @@ makeopens(
 	sname = home_replace_save(NULL, globaldir != NULL ? globaldir : dirnow);
 	if (sname == NULL
 		|| fputs("cd ", fd) < 0
-		|| ses_put_fname(fd, sname, &ssop_flags) == FAIL
-		|| put_eol(fd) == FAIL)
+		|| ses_put_fname(fd, sname, &ssop_flags, true) == FAIL)
 	{
 	    vim_free(sname);
 	    goto fail;
@@ -921,8 +921,8 @@ makeopens(
 	if ((ssop_flags & SSOP_CURDIR) && tp->tp_localdir != NULL)
 	{
 	    if (fputs("tcd ", fd) < 0
-		     || ses_put_fname(fd, tp->tp_localdir, &ssop_flags) == FAIL
-		     || put_eol(fd) == FAIL)
+		     || ses_put_fname(fd, tp->tp_localdir, &ssop_flags, true)
+			     == FAIL)
 		goto fail;
 	    did_lcd = TRUE;
 	}
