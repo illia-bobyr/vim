@@ -269,18 +269,15 @@ ses_win_rec(FILE *fd, frame_T *fr)
 	{
 	    // Make window as big as possible so that we have lots of room
 	    // to split.
-	    if (put_line(fd, "wincmd _ | wincmd |") == FAIL
-		    || put_line(fd, fr->fr_layout == FR_COL
-			? "split" : "vsplit") == FAIL)
-		return FAIL;
+	    FD_LINE("wincmd _ | wincmd |");
+	    FD_LINE(fr->fr_layout == FR_COL ? "split" : "vsplit");
 	    ++count;
 	}
 
     // Go back to the first window.
-    if (count > 0 && (fprintf(fd, fr->fr_layout == FR_COL
-		    ? ":%dwincmd k" : ":%dwincmd h", count) < 0
-		|| put_eol(fd) == FAIL))
-	return FAIL;
+    if (count > 0)
+       FD_PRINTF(fr->fr_layout == FR_COL ? ":%dwincmd k" : ":%dwincmd h",
+	       count);
 
     // Recursively create frames/windows in each window of this column or
     // row.
@@ -290,11 +287,14 @@ ses_win_rec(FILE *fd, frame_T *fr)
 	ses_win_rec(fd, frc);
 	frc = ses_skipframe(frc->fr_next);
 	// Go to next window.
-	if (frc != NULL && put_line(fd, "wincmd w") == FAIL)
-	    return FAIL;
+	if (frc != NULL)
+	   FD_LINE("wincmd w");
     }
 
     return OK;
+
+fail:
+    return FAIL;
 }
 
     static int
