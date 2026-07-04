@@ -1226,6 +1226,79 @@ fail:
 static int mksession_nl = FALSE;    // use NL only in put_eol()
 #endif
 
+#if defined(FEAT_EVAL)
+/*
+ * Writes "import autoload" expressions that load all the autoload imports.
+ * Returns false if a write into "fd" failed.
+ */
+    static bool
+ses_impot_autoload(FILE *fd)
+{
+    int		    sid;
+    int		    b_sid;
+    scriptitem_T    *si = NULL;
+    char_u	    *path;
+    char_u	    *filename;
+
+    // Save delay load import modules.
+    // Either SSOP_LOCALOPTIONS or SSOP_OPTIONS require them
+    for (sid = 1; sid <= script_items.ga_len; ++sid)
+    {
+	si = SCRIPT_ITEM(sid);
+
+	path = si->sn_name;
+
+	// Autoload script paths may be absolute, relative to the
+	// current script or relative to a 'runtimepath' directory
+	// Ignore if missing
+	if (!(si->sn_autoload_prefix || si->sn_import_autoload)
+		|| !file_is_readable(path))
+	    continue;
+
+	// Check if conflicts with a previous import
+	b_sid = sid - 1;
+	filename = gettail(path);
+
+	for (; b_sid; --b_sid)
+	{
+	    scriptitem_T *b_si;
+	    char_u *b_path;
+
+	    b_si = SCRIPT_ITEM(b_sid);
+	    b_path = b_si->sn_name;
+
+	    // Only autoload may conflict. Ignore if missing
+	    if (!(b_si->sn_autoload_prefix || b_si->sn_import_autoload)
+		    || !file_is_readable(b_path))
+		continue;
+
+	    // compare prefixes if available
+	    if (si->sn_autoload_prefix != NULL
+		    && b_si->sn_autoload_prefix != NULL
+		    && (STRCMP(si->sn_autoload_prefix,
+			    b_si->sn_autoload_prefix) == 0))
+		break;
+
+	    // otherwise compare tails
+	    char_u *b_filename = gettail(b_path);
+	    if (STRCMP(filename, b_filename) == 0)
+		break;
+	}
+
+	// import the auto script if there are no conflicts
+	if (b_sid == 0)
+	    FD_PRINTF("import autoload '%s'", path);
+	else
+	    FD_PRINTF("# import autoload '%s'", path);
+    }
+
+    return true;
+
+fail:
+    return false;
+}
+#endif
+
 /*
  * ":mkexrc", ":mkvimrc", ":mkview" and ":mksession".
  */
@@ -1243,10 +1316,6 @@ ex_mkrc(exarg_T	*eap)
     int		using_vdir = FALSE;	// using 'viewdir'?
     char_u	*viewFile = NULL;
     unsigned	*flagp;
-#endif
-#if defined(FEAT_EVAL)
-    int		sid;
-    scriptitem_T *si = NULL;
 #endif
 
     if (eap->cmdidx == CMD_mksession || eap->cmdidx == CMD_mkview)
@@ -1382,48 +1451,7 @@ ex_mkrc(exarg_T	*eap)
 					 || makeset(fd, flags, FALSE) == FAIL);
 
 #if defined(FEAT_EVAL)
-	    // Save delay load import modules.
-	    // Either SSOP_LOCALOPTIONS or SSOP_OPTIONS require them
-	    for (sid = 1; sid <= script_items.ga_len; ++sid)
-	    {
-		si = SCRIPT_ITEM(sid);
-
-		// Autoload script paths may be absolute, relative to the
-		// current script or relative to a 'runtimepath' directory
-		// Ignore if missing
-		if ((si->sn_autoload_prefix || si->sn_import_autoload)
-			&& file_is_readable(si->sn_name))
-		{
-		    // Check if conflicts with a previous import
-		    int b_sid = sid - 1;
-		    char_u *name = gettail(si->sn_name);
-
-		    for (; b_sid; --b_sid)
-		    {
-			scriptitem_T *b_si = SCRIPT_ITEM(b_sid);
-
-			// Only autoload may conflict. Ignore if missing
-			if ((!b_si->sn_autoload_prefix && !b_si->sn_import_autoload)
-				|| !file_is_readable(b_si->sn_name))
-			    continue;
-
-			// compare prefixes if available
-			if (si->sn_autoload_prefix != NULL && b_si->sn_autoload_prefix != NULL
-				&& (STRCMP(si->sn_autoload_prefix, b_si->sn_autoload_prefix) == 0))
-			    break;
-
-			// otherwise compare tails
-			char_u *b_name = gettail(b_si->sn_name);
-			if (STRCMP(name, b_name) == 0)
-			    break;
-		    }
-
-		    // import the auto script if there are no conflicts
-		    if (fprintf(fd, "%simport autoload '%s'", b_sid ? "# " : "", si->sn_name) < 0 ||
-			put_eol(fd) == FAIL)
-		    failed = TRUE;
-		}
-	    }
+	    failed |= !ses_impot_autoload(fd);
 #endif
 	}
 
