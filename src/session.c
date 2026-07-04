@@ -59,31 +59,32 @@
     } while (0) \
     /* */
 
+/*
+ * Similar to "FD_LINE" above, but for "ses_buf_fname()".
+ * This will always print the new line at the end.
+ */
+#define FD_BUF_FNAME(prefix, name, flagp) \
+    do { \
+	if (ses_buf_fname(fd, (prefix), (name), (flagp), true) == FAIL) \
+	    goto fail; \
+    } while (0) \
+    /* */
+
 #if defined(FEAT_SESSION)
 
 static int did_lcd;	// whether ":lcd" was produced for a session
 
 /*
- * Write a file name to the session file.
- * Takes care of the "slash" option in 'sessionoptions' and escapes special
- * characters.
- * If "prefix" is not NULL, it is output before the file name.
- * Returns FAIL if writing fails or out of memory.
+ * Escapes a file name, handing escaping and checking "slash" in
+ * 'sessionoptions'.  This is the main logic behind "ses_put_fname()", but
+ * rather than outputing the result into a file, it returns an newly allocated
+ * string.
  */
-    static int
-ses_put_fname(
-	FILE *fd,
-	char *prefix,
-	char_u *name,
-	unsigned *flagp,
-	bool add_eol)
+    static char_u *
+ses_fname_s(char_u *name, unsigned *flagp)
 {
     char_u	*sname;
     char_u	*p;
-    int		retval = OK;
-
-    if (prefix != NULL && fputs(prefix, fd) < 0)
-	return FAIL;
 
     sname = home_replace_save(NULL, name);
     if (sname == NULL)
@@ -100,14 +101,39 @@ ses_put_fname(
     // escape special characters
     p = vim_strsave_fnameescape(sname, VSE_NONE);
     vim_free(sname);
-    if (p == NULL)
+
+    return p;
+}
+
+/*
+ * Write a file name to the session file.
+ * Takes care of the "slash" option in 'sessionoptions' and escapes special
+ * characters.
+ * If "prefix" is not NULL, it is output before the file name.
+ * Returns FAIL if writing fails or out of memory.
+ */
+    static int
+ses_put_fname(
+	FILE *fd,
+	char *prefix,
+	char_u *name,
+	unsigned *flagp,
+	bool add_eol)
+{
+    char_u	*escaped;
+    int		retval = OK;
+
+    if (prefix != NULL && fputs(prefix, fd) < 0)
 	return FAIL;
 
-    // write the result
-    if (fputs((char *)p, fd) < 0)
+    escaped = ses_fname_s(name, flagp);
+    if (escaped == NULL)
+	return FAIL;
+
+    if (fputs((char *)escaped, fd) < 0)
 	retval = FAIL;
 
-    vim_free(p);
+    vim_free(escaped);
 
     if (add_eol && put_eol(fd) == FAIL)
 	retval = FAIL;
@@ -116,12 +142,12 @@ ses_put_fname(
 }
 
 /*
- * Write a buffer name to the session file.
- * Also ends the line, if "add_eol" is TRUE.
- * Returns FAIL if writing fails.
+ * Passes a file name associated with a buffer via "ses_fname_s()".  This is hte
+ * main logic behind "ses_buf_fname()", but rather than outputing the result
+ * into a file, it returns the newly allocated string.
  */
-    static int
-ses_buf_fname(FILE *fd, char *prefix, buf_T *buf, unsigned *flagp, int add_eol)
+    static char_u *
+ses_buf_fname_s(buf_T *buf, unsigned *flagp)
 {
     char_u	*name;
 
@@ -140,9 +166,37 @@ ses_buf_fname(FILE *fd, char *prefix, buf_T *buf, unsigned *flagp, int add_eol)
 	name = buf->b_sfname;
     else
 	name = buf->b_ffname;
-    if (ses_put_fname(fd, prefix, name, flagp, add_eol) == FAIL)
+
+    return ses_fname_s(name, flagp);
+}
+
+/*
+ * Write a buffer name to the session file.
+ * Also ends the line, if "add_eol" is TRUE.
+ * Returns FAIL if writing fails.
+ */
+    static int
+ses_buf_fname(FILE *fd, char *prefix, buf_T *buf, unsigned *flagp, int add_eol)
+{
+    char_u	*escaped;
+    int		retval = OK;
+
+    if (prefix != NULL && fputs(prefix, fd) < 0)
 	return FAIL;
-    return OK;
+
+    escaped = ses_buf_fname_s(buf, flagp);
+    if (escaped == NULL)
+	return FAIL;
+
+    if (fputs((char *)escaped, fd) < 0)
+	retval = FAIL;
+
+    vim_free(escaped);
+
+    if (add_eol && put_eol(fd) == FAIL)
+	retval = FAIL;
+
+    return retval;
 }
 
 /*
@@ -381,10 +435,7 @@ put_view(
 
     // Local argument list.
     if (wp->w_alist == &global_alist)
-    {
-	if (put_line(fd, "argglobal") == FAIL)
-	    return FAIL;
-    }
+	FD_LINE("argglobal");
     else
     {
 	if (ses_arglist(fd, "arglocal", &wp->w_alist->al_ga,
@@ -392,7 +443,7 @@ put_view(
 			|| !(*flagp & SSOP_CURDIR)
 			|| tp->tp_localdir != NULL
 			|| wp->w_localdir != NULL, flagp) == FAIL)
-	    return FAIL;
+	    goto fail;
     }
 
     // Only when part of a session: restore the argument index.  Some
@@ -400,9 +451,7 @@ put_view(
     if (wp->w_arg_idx != current_arg_idx && wp->w_arg_idx < WARGCOUNT(wp)
 						      && flagp == &ssop_flags)
     {
-	if (fprintf(fd, ":%ldargu", (long)wp->w_arg_idx + 1) < 0
-		|| put_eol(fd) == FAIL)
-	    return FAIL;
+	FD_PRINTF(":%ldargu", (long)wp->w_arg_idx + 1);
 	did_next = TRUE;
     }
 
@@ -421,10 +470,8 @@ put_view(
 		    && wp->w_tagstackidx <= wp->w_tagstacklen)
 		curtag = (char *)wp->w_tagstack[wp->w_tagstackidx - 1].tagname;
 
-	    if (put_line(fd, "enew | setl bt=help") == FAIL
-		    || fprintf(fd, "help %s", curtag) < 0
-		    || put_eol(fd) == FAIL)
-		return FAIL;
+	    FD_LINE("enew | setl bt=help");
+	    FD_PRINTF("help %s", curtag);
 	}
 # ifdef FEAT_TERMINAL
 	else if (bt_terminal(wp->w_buffer))
@@ -437,35 +484,33 @@ put_view(
 	else if (wp->w_buffer->b_ffname != NULL
 		&& !bt_nofilename(wp->w_buffer))
 	{
+	    char_u *fname = ses_buf_fname_s(wp->w_buffer, flagp);
+	    if (fname == NULL)
+		goto fail;
+
 	    // Editing a file in this buffer: use ":edit file".
 	    // This may have side effects! (e.g., compressed or network file).
 	    //
 	    // Note, if a buffer for that file already exists, use :badd to
 	    // edit that buffer, to not lose folding information (:edit resets
 	    // folds in other buffers)
-	    if (fputs("if bufexists(fnamemodify(\"", fd) < 0
-		    || ses_buf_fname(fd, NULL, wp->w_buffer, flagp, FALSE) == FAIL
-		    || fputs("\", \":p\")) | buffer ", fd) < 0
-		    || ses_buf_fname(fd, NULL, wp->w_buffer, flagp, FALSE) == FAIL
-		    || fputs(" | else | edit ", fd) < 0
-		    || ses_buf_fname(fd, NULL, wp->w_buffer, flagp, FALSE) == FAIL
-		    || fputs(" | endif", fd) < 0
-		    || put_eol(fd) == FAIL)
-		return FAIL;
+	    FD_PRINTF(
+		    "if bufexists(fnamemodify(\"%s\", \":p\"))"
+		    " | buffer %s"
+		    " | else"
+		    " | edit %s"
+		    " | endif",
+		    fname, fname, fname
+	    );
 	}
 	else
 	{
 	    // No file in this buffer, just make it empty.
-	    if (put_line(fd, "enew") == FAIL)
-		return FAIL;
+	    FD_LINE("enew");
 # ifdef FEAT_QUICKFIX
 	    if (wp->w_buffer->b_ffname != NULL)
-	    {
 		// The buffer does have a name, but it's not a file name.
-		if (ses_buf_fname(fd, "file ", wp->w_buffer, flagp, TRUE)
-			== FAIL)
-		    return FAIL;
-	    }
+		FD_BUF_FNAME("file ", wp->w_buffer, flagp);
 # endif
 	    do_cursor = FALSE;
 	}
@@ -480,9 +525,8 @@ put_view(
 		&& alt != NULL
 		&& alt->b_fname != NULL
 		&& *alt->b_fname != NUL
-		&& alt->b_p_bl
-		&& ses_buf_fname(fd, "balt ", alt, flagp, TRUE) == FAIL)
-	    return FAIL;
+		&& alt->b_p_bl)
+	    FD_BUF_FNAME("balt ", alt, flagp);
     }
 
     // Local mappings and abbreviations.
@@ -529,60 +573,49 @@ put_view(
 
 	// Restore the cursor line in the file and relatively in the
 	// window.  Don't use "G", it changes the jumplist.
-	if (put_line(fd, "{") == FAIL)
-	    return FAIL;
+	FD_LINE("{");
 
 	if (wp->w_height <= 0)
-	{
-	    if (fprintf(fd, "  var l: number = %ld", (long)wp->w_cursor.lnum) < 0)
-		return FAIL;
-	}
-	else if (fprintf(fd,
+	    FD_PRINTF("  var l: number = %ld", (long)wp->w_cursor.lnum);
+	else
+	    FD_PRINTF(
 		    "  var l: number = %ld - ((%ld * winheight(0) + %ld) / %ld)",
 		    (long)wp->w_cursor.lnum,
 		    (long)(wp->w_cursor.lnum - wp->w_topline),
-		    (long)wp->w_height / 2, (long)wp->w_height) < 0)
-	    return FAIL;
+		    (long)wp->w_height / 2, (long)wp->w_height
+	    );
 
-	if (put_eol(fd) == FAIL
-		|| put_line(fd, "  if l < 1 | l = 1 | endif") == FAIL
-		|| put_line(fd, "  keepjumps exe \":\" .. l") == FAIL
-		|| put_line(fd, "  normal! zt") == FAIL
-		|| fprintf(fd, "  keepjumps :%ld", (long)wp->w_cursor.lnum) < 0
-		|| put_eol(fd) == FAIL)
-	    return FAIL;
+	FD_LINE("  if l < 1 | l = 1 | endif");
+	FD_LINE("  keepjumps exe \":\" .. l");
+	FD_LINE("  normal! zt");
+	FD_PRINTF("  keepjumps :%ld", (long)wp->w_cursor.lnum);
+
 	// Restore the cursor column and left offset when not wrapping.
 	if (wp->w_cursor.col == 0)
-	{
-	    if (put_line(fd, "  normal! 0") == FAIL)
-		return FAIL;
-	}
+	    FD_LINE("  normal! 0");
 	else
 	{
 	    if (!wp->w_p_wrap && wp->w_leftcol > 0 && wp->w_width > 0)
 	    {
-		if (fprintf(fd,
-			  "  var c: number = %ld - ((%ld * winwidth(0) + %ld) / %ld)",
-			    (long)wp->w_virtcol + 1,
-			    (long)(wp->w_virtcol - wp->w_leftcol),
-			    (long)wp->w_width / 2, (long)wp->w_width) < 0
-			|| put_eol(fd) == FAIL
-			|| put_line(fd, "  if c > 0") == FAIL
-			|| fprintf(fd,
-			    "    exe 'normal! ' .. c .. '|zs' .. %ld .. '|'",
-			    (long)wp->w_virtcol + 1) < 0
-			|| put_eol(fd) == FAIL
-			|| put_line(fd, "  else") == FAIL
-			|| put_view_curpos(fd, wp, "    ") == FAIL
-			|| put_line(fd, "  endif") == FAIL)
-		    return FAIL;
+		FD_PRINTF(
+		    "  var c: number = %ld - ((%ld * winwidth(0) + %ld) / %ld)",
+		    (long)wp->w_virtcol + 1,
+		    (long)(wp->w_virtcol - wp->w_leftcol),
+		    (long)wp->w_width / 2, (long)wp->w_width
+		);
+		FD_LINE("  if c > 0");
+		FD_PRINTF("    exe 'normal! ' .. c .. '|zs' .. %ld .. '|'",
+			(long)wp->w_virtcol + 1);
+		FD_LINE("  else");
+		if (put_view_curpos(fd, wp, "    ") == FAIL)
+		    goto fail;
+		FD_LINE("  endif");
 	    }
 	    else if (put_view_curpos(fd, wp, "  ") == FAIL)
-		return FAIL;
+		goto fail;
 	}
 
-	if (put_line(fd, "}") == FAIL)
-	    return FAIL;
+	FD_LINE("}");
     }
 
     // Local directory, if the current flag is not view options or the "curdir"
@@ -590,12 +623,14 @@ put_view(
     if (wp->w_localdir != NULL
 			    && (flagp != &vop_flags || (*flagp & SSOP_CURDIR)))
     {
-	if (ses_put_fname(fd, "lcd ", wp->w_localdir, flagp, true) == FAIL)
-	    return FAIL;
+	FD_SES_FNAME("lcd ", wp->w_localdir, flagp);
 	did_lcd = TRUE;
     }
 
     return OK;
+
+fail:
+    return FAIL;
 }
 
 # ifdef FEAT_EVAL
