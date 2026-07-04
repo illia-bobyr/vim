@@ -640,64 +640,62 @@ store_session_globals(FILE *fd)
     hashtab_T	*gvht = get_globvar_ht();
     hashitem_T	*hi;
     dictitem_T	*this_var;
+    vartype_T   var_type;
     int		todo;
-    char_u	*p, *t;
+    char_u	*p = NULL, *t;
 
     todo = (int)gvht->ht_used;
     FOR_ALL_HASHTAB_ITEMS(gvht, hi, todo)
     {
-	if (!HASHITEM_EMPTY(hi))
-	{
-	    --todo;
-	    this_var = HI2DI(hi);
-	    if ((this_var->di_tv.v_type == VAR_NUMBER
-			|| this_var->di_tv.v_type == VAR_STRING)
-		    && var_flavour(this_var->di_key) == VAR_FLAVOUR_SESSION)
-	    {
-		// Escape special characters with a backslash.  Turn a LF and
-		// CR into \n and \r.
-		p = vim_strsave_escaped(tv_get_string(&this_var->di_tv),
-							(char_u *)"\\\"\n\r");
-		if (p == NULL)	    // out of memory
-		    break;
-		for (t = p; *t != NUL; ++t)
-		    if (*t == '\n')
-			*t = 'n';
-		    else if (*t == '\r')
-			*t = 'r';
-		if ((fprintf(fd, "g:%s = %c%s%c",
-				this_var->di_key,
-				(this_var->di_tv.v_type == VAR_STRING) ? '"'
-									: ' ',
-				p,
-				(this_var->di_tv.v_type == VAR_STRING) ? '"'
-								   : ' ') < 0)
-			|| put_eol(fd) == FAIL)
-		{
-		    vim_free(p);
-		    return FAIL;
-		}
-		vim_free(p);
-	    }
-	    else if (this_var->di_tv.v_type == VAR_FLOAT
-		    && var_flavour(this_var->di_key) == VAR_FLAVOUR_SESSION)
-	    {
-		float_T f = this_var->di_tv.vval.v_float;
-		int sign = ' ';
+	if (HASHITEM_EMPTY(hi))
+	    continue;
 
-		if (f < 0)
-		{
-		    f = -f;
-		    sign = '-';
-		}
-		if ((fprintf(fd, "g:%s = %c%f",
-					       this_var->di_key, sign, f) < 0)
-			|| put_eol(fd) == FAIL)
-		    return FAIL;
-	    }
+	--todo;
+	this_var = HI2DI(hi);
+
+	if (var_flavour(this_var->di_key) != VAR_FLAVOUR_SESSION)
+	    continue;
+
+	var_type = this_var->di_tv.v_type;
+	if (var_type == VAR_NUMBER)
+	{
+	    varnumber_T n = this_var->di_tv.vval.v_number;
+
+	    FD_PRINTF("g:%s = %lld", this_var->di_key, n);
+	}
+	else if (var_type == VAR_FLOAT)
+	{
+	    float_T f = this_var->di_tv.vval.v_float;
+
+	    FD_PRINTF("g:%s = %f", this_var->di_key, f);
+	}
+	else if (var_type == VAR_STRING)
+	{
+	    p = tv_get_string(&this_var->di_tv);
+
+	    // Escape special characters with a backslash.  Turn a LF and
+	    // CR into \n and \r.
+	    p = vim_strsave_escaped(p, (char_u *)"\\\"\n\r");
+	    if (p == NULL)	    // out of memory
+		goto fail;
+	    for (t = p; *t != NUL; ++t)
+		if (*t == '\n')
+		    *t = 'n';
+		else if (*t == '\r')
+		    *t = 'r';
+
+	    FD_PRINTF("g:%s = \"%s\"", this_var->di_key, p);
+
+	    vim_free(p);
+	    p = NULL;
 	}
     }
+
     return OK;
+
+fail:
+    vim_free(p);
+    return FAIL;
 }
 # endif
 
