@@ -1151,6 +1151,7 @@ write_session_file(char_u *filename)
 {
     char_u	    *escaped_filename;
     char	    *mksession_cmdline;
+    FILE	    *fd;
     unsigned int    save_ssop_flags;
     int		    failed;
 
@@ -1178,6 +1179,13 @@ write_session_file(char_u *filename)
     ssop_flags = (SSOP_BLANK|SSOP_CURDIR|SSOP_FOLDS|SSOP_GLOBALS
 		  |SSOP_HELP|SSOP_OPTIONS|SSOP_WINSIZE|SSOP_TABPAGES);
 
+    // There seems to be a bug here.  It looks like "g:Save_VV_this_session"
+    // variable name was selected such that it would be preserved in the session
+    // file.  And the line added to the end of the session file is using this
+    // variable value to restore the "v:this_session" value.  But this would not
+    // work, as only variables that have exactly one uppercase letter are
+    // stored.  "g:Save_VV_this_session" has "VV" in the middle, and so it will
+    // be skipped.  See 'help sessionoptions' as well as "var_flavour()" code.
     do_cmdline_cmd((char_u *)"let Save_VV_this_session = v:this_session");
     failed = (do_cmdline_cmd((char_u *)mksession_cmdline) == FAIL);
     do_cmdline_cmd((char_u *)"let v:this_session = Save_VV_this_session");
@@ -1186,29 +1194,28 @@ write_session_file(char_u *filename)
     ssop_flags = save_ssop_flags;
     vim_free(mksession_cmdline);
 
+    if (failed)
+	goto fail;
+
     // Reopen the file and append a command to restore v:this_session,
     // as if this save never happened.	This is to avoid conflicts with
     // the user's own sessions.  FIXME: It's probably less hackish to add
     // a "stealth" flag to 'sessionoptions' -- gotta ask Bram.
-    if (!failed)
-    {
-	FILE *fd;
+    fd = open_exfile(filename, TRUE, APPENDBIN);
+    if (fd == NULL)
+	goto fail;
 
-	fd = open_exfile(filename, TRUE, APPENDBIN);
+    FD_LINE("v:this_session = g:Save_VV_this_session");
+    FD_LINE("unlet g:Save_VV_this_session");
 
-	failed = (fd == NULL
-	       || put_line(fd, "v:this_session = g:Save_VV_this_session")
-									== FAIL
-	       || put_line(fd, "unlet g:Save_VV_this_session") == FAIL);
+    if (fclose(fd) != 0)
+	goto fail;
 
-	if (fd != NULL && fclose(fd) != 0)
-	    failed = TRUE;
+    return TRUE;
 
-	if (failed)
-	    mch_remove(filename);
-    }
-
-    return !failed;
+fail:
+    mch_remove(filename);
+    return FALSE;
 }
 # endif
 
